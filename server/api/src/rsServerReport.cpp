@@ -482,7 +482,7 @@ irods::error get_resource_array(
 
 irods::error get_file_contents(
     const std::string _fn,
-    std::string       _cont ) {
+    std::string&       _cont ) {
 
     std::ifstream f( _fn.c_str() );
     std::stringstream ss;
@@ -562,6 +562,7 @@ irods::error get_config_dir(
 
             std::string contents;
             ret = get_file_contents( name, contents );
+
             if ( !ret.ok() ) {
                 irods::log( PASS( ret ) );
                 continue;
@@ -588,7 +589,7 @@ irods::error load_version_file(
     try {
         version_file = irods::get_irods_home_directory();
     } catch (const irods::exception& e) {
-        rodsLog(LOG_ERROR, e.what());
+        irods::log(e);
         return ERROR(-1, "failed to get irods home directory");
     }
     version_file.append("VERSION.json");

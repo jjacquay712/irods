@@ -39,12 +39,12 @@ namespace irods {
                                         * LOCAL_USER_AUTH, REMOTE_PRIV_USER_AUTH or
                                         * LOCAL_PRIV_USER_AUTH */
         int            proxyUserAuth;                    /* same for proxyUser */
-        packInstruct_t inPackInstruct; /* the packing instruct for the input
+        const char*    inPackInstruct; /* the packing instruct for the input
                                         * struct */
         int inBsFlag;                  /* input bytes stream flag. 0 ==> no input
                                         * byte stream. 1 ==> we have an input byte
                                         * stream */
-        packInstruct_t outPackInstruct;/* the packing instruction for the
+        const char*    outPackInstruct;/* the packing instruction for the
                                         * output struct */
         int            outBsFlag;      /* output bytes stream. 0 ==> no output byte
                                         * stream. 1 ==> we have an output byte stream
@@ -144,7 +144,7 @@ namespace irods {
                                 &rei );
 
                         for ( auto& ns : NamespacesHelper::Instance()->getNamespaces() ) {
-                            std::string rule_name = ns + "pep_api_" + operation_name + "_pre";
+                            std::string rule_name = ns + "pep_" + operation_name + "_pre";
                             if ( RuleExistsHelper::Instance()->checkOperation( rule_name ) ) {
                                 if ( re_ctx_mgr.rule_exists( rule_name, ret ).ok() && ret ) {
                                     op_err = re_ctx_mgr.exec_rule( rule_name, "api_instance", ctx, std::forward<types_t>(_t)... );
@@ -177,7 +177,7 @@ namespace irods {
                         }
 
                         for ( auto& ns : NamespacesHelper::Instance()->getNamespaces() ) {
-                            std::string rule_name = ns + "pep_api_" + operation_name + "_post";
+                            std::string rule_name = ns + "pep_" + operation_name + "_post";
                             if ( RuleExistsHelper::Instance()->checkOperation( rule_name ) ) {
                                 if ( re_ctx_mgr.rule_exists( rule_name, ret ).ok() && ret ) {
                                     op_err = re_ctx_mgr.exec_rule( rule_name, "api_instance", ctx, std::forward<types_t>(_t)... );
@@ -229,12 +229,12 @@ namespace irods {
                                         * LOCAL_USER_AUTH, REMOTE_PRIV_USER_AUTH or
                                         * LOCAL_PRIV_USER_AUTH */
             int            proxyUserAuth;                    /* same for proxyUser */
-            packInstruct_t inPackInstruct; /* the packing instruct for the input
+            const char*    inPackInstruct; /* the packing instruct for the input
                                         * struct */
             int inBsFlag;                  /* input bytes stream flag. 0 ==> no input
                                         * byte stream. 1 ==> we have an input byte
                                         * stream */
-            packInstruct_t outPackInstruct;/* the packing instruction for the
+            const char*    outPackInstruct;/* the packing instruction for the
                                         * output struct */
             int            outBsFlag;      /* output bytes stream. 0 ==> no output byte
                                         * stream. 1 ==> we have an output byte stream

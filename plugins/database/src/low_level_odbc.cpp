@@ -103,12 +103,18 @@ logPsgError( int level, HENV henv, HDBC hdbc, HSTMT hstmt, int dbType ) {
                     strstr( ( char * )psgErrorMsg, "Duplicate entry" ) ) {
                 errorVal = CATALOG_ALREADY_HAS_ITEM_BY_THAT_NAME;
             }
-        }
-        else {
-            if ( strstr( ( char * )psgErrorMsg, "duplicate key" ) ) {
+        } else if (dbType == DB_TYPE_POSTGRES ) {
+            if ( strcmp( ( char * )sqlstate, "23505" ) == 0 &&
+                    strstr( ( char * )psgErrorMsg, "duplicate key" ) ) {
+                errorVal = CATALOG_ALREADY_HAS_ITEM_BY_THAT_NAME;
+            }
+        } else if ( dbType == DB_TYPE_ORACLE ) { 
+            if ( strcmp( ( char * )sqlstate, "23000" ) == 0 &&
+                    strstr( ( char * )psgErrorMsg, "unique constraint" ) ) {
                 errorVal = CATALOG_ALREADY_HAS_ITEM_BY_THAT_NAME;
             }
         }
+
         rodsLog( level, "SQLSTATE: %s", sqlstate );
         rodsLog( level, "SQLCODE: %ld", sqlcode );
         rodsLog( level, "SQL Error message: %s", psgErrorMsg );
@@ -392,7 +398,7 @@ logTheBindVariables( int level ) {
     for ( int i = 0; i < cllBindVarCountPrev; i++ ) {
         char tmpStr[TMP_STR_LEN + 2];
         snprintf( tmpStr, TMP_STR_LEN, "bindVar[%d]=%s", i + 1, cllBindVars[i] );
-        rodsLog( level, tmpStr );
+        rodsLog( level, "%s", tmpStr );
     }
 }
 
@@ -459,7 +465,7 @@ _cllExecSqlNoResult(
     icatSessionStruct* icss,
     const char*        sql,
     int                option ) {
-    rodsLog( LOG_DEBUG10, sql );
+    rodsLog( LOG_DEBUG10, "%s", sql );
 
     HDBC myHdbc = icss->connectPtr;
     HSTMT myHstmt;
@@ -560,7 +566,7 @@ cllExecSqlWithResult( icatSessionStruct *icss, int *stmtNum, const char *sql ) {
        needed here, and in fact causes postgres processes to be in the
        'idle in transaction' state which prevents some operations (such as
        backup).  So this was removed. */
-    rodsLog( LOG_DEBUG10, sql );
+    rodsLog( LOG_DEBUG10, "%s", sql );
 
     HDBC myHdbc = icss->connectPtr;
     HSTMT hstmt;
@@ -727,7 +733,7 @@ cllExecSqlWithResultBV(
     const char *sql,
     std::vector< std::string > &bindVars ) {
 
-    rodsLog( LOG_DEBUG10, sql );
+    rodsLog( LOG_DEBUG10, "%s", sql );
 
     HDBC myHdbc = icss->connectPtr;
     HSTMT hstmt;

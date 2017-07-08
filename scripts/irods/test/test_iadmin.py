@@ -9,6 +9,7 @@ import commands
 import contextlib
 import copy
 import getpass
+import inspect
 import json
 import os
 import shutil
@@ -20,35 +21,14 @@ import tempfile
 
 from ..configuration import IrodsConfig
 from ..controller import IrodsController
+from ..core_file import temporary_core_file
 from .. import paths
 from .. import test
 from . import session
 from . import settings
 from .. import lib
 from . import resource_suite
-
-rule1_2242_contents = '''test {
-    $userNameClient = "foobar";
-}
-
-INPUT *A="status"
-OUTPUT ruleExecOut
-
-'''
-
-rule2_2242_contents = '''test {
-    $status = "1";
-}
-
-acPreProcForWriteSessionVariable(*x) {
-    writeLine("stdout", "bwahahaha");
-    succeed;
-}
-
-INPUT *A="status"
-OUTPUT ruleExecOut
-
-'''
+from .rule_texts_for_tests import rule_texts
 
 def write_host_access_control(filename, username, group, address, mask):
     add_ent = {
@@ -66,6 +46,8 @@ def write_host_access_control(filename, username, group, address, mask):
 
 
 class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
+    plugin_name = IrodsConfig().default_rule_engine_plugin
+    class_name = 'Test_Iadmin'
 
     def setUp(self):
         super(Test_Iadmin, self).setUp()
@@ -76,6 +58,22 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
     ###################
     # iadmin
     ###################
+
+    def test_ibun__issue_3571(self):
+        test_file = "ibun_test_file"
+        lib.make_file(test_file, 1000)
+        
+        tar_path = self.admin.session_collection + '/somefile.tar'
+        dir_path = self.admin.session_collection + '/somedir'
+
+        self.admin.assert_icommand("imkdir " + dir_path)
+        for i in range(257):
+            self.admin.assert_icommand("iput %s %s/foo%d" % (test_file, dir_path, i))
+
+        self.admin.assert_icommand("ibun -cD tar " + tar_path + " " + dir_path)
+
+        self.admin.assert_icommand("irm -rf " + dir_path)
+        self.admin.assert_icommand("irm -rf " + tar_path)
 
     def test_tokens(self):
         self.admin.assert_icommand(['iadmin', 'at', 'user_type', 'rodstest', self.admin.username])
@@ -993,74 +991,42 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
     def test_host_access_control(self):
         my_ip = socket.gethostbyname(socket.gethostname())
 
-        # manipulate the core.re to enable host access control
-        corefile = IrodsConfig().core_re_directory + "/core.re"
-        origcorefile = corefile + '.orig'
-        backupcorefile = corefile + "--" + self._testMethodName
-        shutil.copy(corefile, backupcorefile)
-        part1 = "sed -e '/^acChkHostAccessControl { }/i acChkHostAccessControl { msiCheckHostAccessControl; }' "
-        part2 = part1 + corefile + ' > ' + origcorefile
-        os.system(part2)
-        time.sleep(1)  # remove once file hash fix is commited #2279
-        os.system("cp " + origcorefile + " " + corefile)
-        time.sleep(1)  # remove once file hash fix is commited #2279
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
 
-        # restart the server to reread the new core.re
-        IrodsController().restart()
+            # restart the server to reread the new core.re
+            IrodsController().restart()
 
-        host_access_control = ''
-        if os.path.isfile('/etc/irods/host_access_control_config.json'):
-            host_access_control = '/etc/irods/host_access_control_config.json'
-        else:
-            host_access_control = os.path.join(IrodsConfig().config_directory, 'host_access_control_config.json')
+            host_access_control = os.path.join(paths.config_directory(), 'host_access_control_config.json')
 
-        orig_file = host_access_control + '.orig'
-        os.system('cp %s %s' % (host_access_control, orig_file))
-
-        write_host_access_control(host_access_control, 'nope', 'nope', '', '')
-
-        self.admin.assert_icommand_fail("ils", 'STDERR_SINGLELINE', "SYS_AGENT_INIT_ERR")
-
-        write_host_access_control(host_access_control, 'all', 'all', my_ip, '255.255.255.255')
-
-        self.admin.assert_icommand("ils", 'STDOUT_SINGLELINE', self.admin.zone_name)
-
-        # restore the original host_access_control.json
-        os.system('mv %s %s' % (orig_file, host_access_control))
-
-        # restore the original core.re
-        shutil.copy(backupcorefile, corefile)
-        os.remove(backupcorefile)
+            with lib.file_backed_up(host_access_control):
+                write_host_access_control(host_access_control, 'nope', 'nope', '', '')
+                self.admin.assert_icommand("ils", 'STDERR_SINGLELINE', "SYS_AGENT_INIT_ERR")
+                write_host_access_control(host_access_control, 'all', 'all', my_ip, '255.255.255.255')
+                self.admin.assert_icommand("ils", 'STDOUT_SINGLELINE', self.admin.zone_name)
 
     def test_issue_2420(self):
-        # manipulate the core.re to enable host access control
-        corefile = IrodsConfig().core_re_directory + "/core.re"
-        origcorefile = corefile + '.orig'
-        backupcorefile = corefile + "--" + self._testMethodName
-        shutil.copy(corefile, backupcorefile)
-        part1 = "sed -e '/^acAclPolicy {msiAclPolicy(\"STRICT\"); }/iacAclPolicy {ON($userNameClient == \"quickshare\") { } }' "
-        part2 = part1 + corefile + ' > ' + origcorefile
-        os.system(part2)
-        time.sleep(1)  # remove once file hash fix is commited #2279
-        os.system("cp " + origcorefile + " " + corefile)
-        time.sleep(1)  # remove once file hash fix is commited #2279
 
-        # restart the server to reread the new core.re
-        IrodsController().restart()
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
 
-        self.admin.assert_icommand("ils", 'STDOUT_SINGLELINE', self.admin.zone_name)
+            # restart the server to reread the new core.re
+            IrodsController().restart()
 
-        # look for the error "unable to read session variable $userNameClient."
-        out, _, _ = lib.execute_command_permissive(
-            ['grep', 'unable to read session variable $userNameClient.', IrodsConfig().server_log_path])
+            self.admin.assert_icommand("ils", 'STDOUT_SINGLELINE', self.admin.zone_name)
 
-        # restore the original core.re
-        shutil.copy(backupcorefile, corefile)
-        os.remove(backupcorefile)
+            # look for the error "unable to read session variable $userNameClient."
+            out, _, _ = lib.execute_command_permissive(
+                ['grep', 'unable to read session variable $userNameClient.', IrodsConfig().server_log_path])
 
         # check the results for the error
         assert(-1 == out.find("userNameClient"))
 
+    @unittest.skipIf(plugin_name == 'irods_rule_engine_plugin-python', 'python does not yet support msiGetStdoutInExecCmdOut - RTS')
     def test_server_config_environment_variables(self):
         irods_config = IrodsConfig()
         with lib.file_backed_up(irods_config.server_config_path):
@@ -1113,16 +1079,14 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
     def test_msiset_default_resc__2712(self):
         hostname = lib.get_hostname()
         testresc1 = 'TestResc'
-        corefile = IrodsConfig().core_re_directory + "/core.re"
-        with lib.file_backed_up(corefile):
-            initial_size_of_server_log = lib.get_file_size_by_path(IrodsConfig().server_log_path)
-            rules_to_prepend = 'acSetRescSchemeForCreate{ msiSetDefaultResc("' + testresc1 + '","forced"); }\n'
+        with temporary_core_file() as core:
             time.sleep(2)  # remove once file hash fix is commited #2279
-            lib.prepend_string_to_file(rules_to_prepend, corefile)
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
             time.sleep(2)  # remove once file hash fix is commited #2279
 
             trigger_file = 'file_to_trigger_acSetRescSchemeForCreate'
             lib.make_file(trigger_file, 10)
+            initial_size_of_server_log = lib.get_file_size_by_path(IrodsConfig().server_log_path)
             self.user0.assert_icommand(['iput', trigger_file])
             self.user0.assert_icommand(['ils', '-L', trigger_file], 'STDOUT_SINGLELINE', testresc1)
 
@@ -1214,3 +1178,24 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
         self.admin.assert_icommand(["iadmin", "rfg", "g1", self.user1.username])
         self.admin.assert_icommand(["iadmin", "rfg", "g1", self.user1.username])
         self.admin.assert_icommand(["iadmin", "rmgroup", "g1"])
+
+    def test_idempotent_aua__issue_3104(self):
+        username = 'issue_3104_user'
+        authentication_name = '3104_user@TEST.AUTHENTICATION'
+        self.admin.assert_icommand(['iadmin', 'mkuser', username, 'rodsuser'])
+        self.admin.assert_icommand(['iadmin', 'aua', username, authentication_name])
+        self.admin.assert_icommand(['iadmin', 'aua', username, authentication_name])
+        self.admin.assert_icommand(['iadmin', 'aua', username, authentication_name])
+        self.admin.assert_icommand(['iadmin', 'aua', username, authentication_name])
+        self.admin.assert_icommand(['iadmin', 'aua', username, authentication_name])
+        out, _, _ = self.admin.run_icommand(['iadmin', 'lua', username])
+        self.assertEqual(len(out.splitlines()), 1, 'iadmin lua returned more than one line')
+
+    def test_addchildtoresc_forbidden_characters_3449(self):
+        self.admin.assert_icommand(['iadmin', 'mkresc', 'parent', 'passthru'], 'STDOUT_SINGLELINE', 'passthru')
+        self.admin.assert_icommand(['iadmin', 'mkresc', 'child', 'passthru'], 'STDOUT_SINGLELINE', 'passthru')
+        self.admin.assert_icommand(['iadmin', 'addchildtoresc', 'parent', 'child', ';'], 'STDERR_SINGLELINE', 'SYS_INVALID_INPUT_PARAM')
+        self.admin.assert_icommand(['iadmin', 'addchildtoresc', 'parent', 'child', '}'], 'STDERR_SINGLELINE', 'SYS_INVALID_INPUT_PARAM')
+        self.admin.assert_icommand(['iadmin', 'addchildtoresc', 'parent', 'child', '{'], 'STDERR_SINGLELINE', 'SYS_INVALID_INPUT_PARAM')
+        self.admin.assert_icommand(['iadmin', 'rmresc', 'parent'])
+        self.admin.assert_icommand(['iadmin', 'rmresc', 'child'])

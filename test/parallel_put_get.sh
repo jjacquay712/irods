@@ -10,22 +10,26 @@
 # - JOBS is the number of parallel jobs
 #
 # - Creates FILES_TO_CREATE FILESIZE_IN_MB MiB files in FILES_FULLPATH
-# - Puts the files into BENCHMARKS_DIR
+# - Puts the files into BENCHMARKS_COLL
 # - Gets the files into BENCHMARKS_FULLPATH
 #
 ###############################
 
 SCRIPTPATH=$( cd $(dirname $0) ; pwd -P )
+TIMESTAMPISH=$( date +%s )${RANDOM}
+RELATIVEPATH="scratch_for_parallelputget/${TIMESTAMPISH}"
+
 
 FILESIZE_IN_MB=40
 FILES_TO_CREATE=256
-FILES_DIR=files.dir
-BENCHMARKS_DIR=benchmarks.dir
-TARGET_RESOURCE=demoResc
+FILES_DIR="${RELATIVEPATH}/files.dir"
+BENCHMARKS_COLL="${RELATIVEPATH}/benchmarks.coll"
+TARGET_RESOURCE="demoResc"
 JOBS=30
 
+
 FILES_FULLPATH=${SCRIPTPATH}/${FILES_DIR}
-BENCHMARKS_FULLPATH=${SCRIPTPATH}/${BENCHMARKS_DIR}
+BENCHMARKS_FULLPATH=${SCRIPTPATH}/${BENCHMARKS_COLL}
 
 ####################################
 # generate files
@@ -43,19 +47,19 @@ done
 mkdir -p ${BENCHMARKS_FULLPATH}
 for i in `ls ${FILES_FULLPATH}`
 do
-    echo iput -R ${TARGET_RESOURCE} -K -f ${FILES_FULLPATH}/${i} ${BENCHMARKS_DIR}/
+    echo iput -R ${TARGET_RESOURCE} -K -f ${FILES_FULLPATH}/${i} ${BENCHMARKS_COLL}/
 done > ${BENCHMARKS_FULLPATH}/iput-all
 for i in `ls ${FILES_FULLPATH}`
 do
-    echo iget -R ${TARGET_RESOURCE} -K -f ${BENCHMARKS_DIR}/${i} ${BENCHMARKS_FULLPATH}/
+    echo iget -R ${TARGET_RESOURCE} -K -f ${BENCHMARKS_COLL}/${i} ${BENCHMARKS_FULLPATH}/
 done > ${BENCHMARKS_FULLPATH}/iget-all
 
 ####################################
 # parallel put and get
 ####################################
-imkdir -p ${BENCHMARKS_DIR}
-irm -rf ${BENCHMARKS_DIR}
-imkdir -p ${BENCHMARKS_DIR}
+imkdir -p ${BENCHMARKS_COLL}
+irm -rf ${BENCHMARKS_COLL}
+imkdir -p ${BENCHMARKS_COLL}
 COUNT=0
 time while [ "$?" == "0" ]; do
     COUNT=$((COUNT+1))

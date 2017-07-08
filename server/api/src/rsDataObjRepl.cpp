@@ -617,7 +617,7 @@ _rsDataObjReplS(
     try {
         single_buff_sz = irods::get_advanced_setting<const int>(irods::CFG_MAX_SIZE_FOR_SINGLE_BUFFER) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return e.code();
     }
 
@@ -625,7 +625,7 @@ _rsDataObjReplS(
         status = l3DataStageSync( rsComm, l1descInx );
     }
     else if ( L1desc[l1descInx].dataObjInp->numThreads == 0 &&
-              L1desc[l1descInx].dataObjInfo->dataSize  <= single_buff_sz ) {
+              L1desc[L1desc[l1descInx].srcL1descInx].dataObjInfo->dataSize  <= single_buff_sz ) {
         status = l3DataCopySingleBuf( rsComm, l1descInx );
     }
     else {
@@ -857,7 +857,7 @@ dataObjOpenForRepl(
     try {
         single_buff_sz = irods::get_advanced_setting<const int>(irods::CFG_MAX_SIZE_FOR_SINGLE_BUFFER) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         freeDataObjInfo( srcDataObjInfo );
         return e.code();
     }

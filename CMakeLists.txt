@@ -43,6 +43,8 @@ set(CMAKE_CXX_COMPILER ${IRODS_EXTERNALS_FULLPATH_CLANG}/bin/clang++)
 
 project(irods C CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+
 if (NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "/" CACHE STRING "Package root path. \"/\" is correct for normal package builds.." FORCE)
   message(STATUS "Setting unspecified CPACK_PACKAGING_INSTALL_PREFIX to '${CPACK_PACKAGING_INSTALL_PREFIX}'. This is the correct setting for normal builds.")
@@ -380,6 +382,7 @@ set(
   ${CMAKE_SOURCE_DIR}/lib/core/src/rcPortalOpr.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/regUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/replUtil.cpp
+  ${CMAKE_SOURCE_DIR}/lib/core/src/rmdirUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rmUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rmtrashUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rsyncUtil.cpp
@@ -1043,6 +1046,7 @@ set(
   ${CMAKE_SOURCE_DIR}/lib/core/src/regUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/region.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/replUtil.cpp
+  ${CMAKE_SOURCE_DIR}/lib/core/src/rmdirUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rmUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rmtrashUtil.cpp
   ${CMAKE_SOURCE_DIR}/lib/core/src/rodsLog.cpp

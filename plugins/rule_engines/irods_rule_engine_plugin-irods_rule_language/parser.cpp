@@ -302,12 +302,20 @@ Token* nextTokenRuleGen( Pointer* e, ParserContext *context, int rulegen, int pa
                 token->type = TK_TEXT;
             }
             else if ( ch == '\"' ) {
-                nextString( e, token->text, token->vars );
-                token->type = TK_STRING;
+                if ( nextString( e, token->text, token->vars ) == -1 ) {
+                    token->type = N_ERROR;
+                }
+                else {
+                    token->type = TK_STRING;
+                }
             }
             else if ( ch == '\'' ) {
-                nextString2( e, token->text, token->vars );
-                token->type = TK_STRING;
+                if ( nextString2( e, token->text, token->vars ) == -1 ) {
+                    token->type = N_ERROR;
+                }
+                else {
+                    token->type = TK_STRING;
+                }
             }
             else if ( ch == '`' ) {
                 if ( lookAhead( e, 1 ) == '`' ) {
@@ -320,8 +328,12 @@ Token* nextTokenRuleGen( Pointer* e, ParserContext *context, int rulegen, int pa
                     }
                 }
                 else {
-                    nextStringBase( e, token->text, "`", 1, '\\', 1, token->vars );
-                    token->type = TK_BACKQUOTED;
+                    if ( nextStringBase( e, token->text, "`", 1, '\\', 1, token->vars ) == -1 ) {
+                        token->type = N_ERROR;
+                    }
+                    else {
+                        token->type = TK_BACKQUOTED;
+                    }
                 }
             }
             else {
@@ -3535,6 +3547,7 @@ char *generateErrMsg( char *msg, long errloc, char *ruleBaseName, char errmsg[ER
         generateErrMsgFromFile( msg, errloc, ruleBaseName + 1, ruleBasePath, errmsg );
         return errmsg;
     default:
+        rodsLog(LOG_ERROR, "generateErrMsg: ruleBaseName of unknown type: [%s] [%ji] [%s]", msg, static_cast<intmax_t>(errloc), ruleBaseName);
         snprintf( errmsg, ERR_MSG_LEN, "<unknown source type>" );
         return errmsg;
     }

@@ -239,14 +239,12 @@ createSrvPortal( rsComm_t *rsComm, portList_t *thisPortList, int proto ) {
         rstrcpy( thisPortList->hostAddr, laddr, LONG_NAME_LEN );
     }
     else {
-        struct hostent *hostEnt;
         /* server. try to use what is configured */
         if (    LocalServerHost != NULL
              && strcmp( LocalServerHost->hostName->name, "localhost" ) != 0
-             && gethostbyname_with_retry( LocalServerHost->hostName->name, &hostEnt ) == 0 ) {
-            rstrcpy( thisPortList->hostAddr, hostEnt->h_name, LONG_NAME_LEN );
-        }
-        else {
+             && get_canonical_name( LocalServerHost->hostName->name, thisPortList->hostAddr, LONG_NAME_LEN) == 0 ) {
+            // empty block b/c get_canonical_name does the copy on success
+        } else {
             rstrcpy( thisPortList->hostAddr, laddr, LONG_NAME_LEN );
         }
     }
@@ -666,7 +664,7 @@ partialDataPut( portalTransferInp_t *myInput ) {
     try {
         chunk_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_CHUNK_SIZE_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -674,7 +672,7 @@ partialDataPut( portalTransferInp_t *myInput ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -892,7 +890,7 @@ void partialDataGet(
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -905,7 +903,7 @@ void partialDataGet(
     try {
         chunk_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_CHUNK_SIZE_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -1120,7 +1118,7 @@ remToLocPartialCopy( portalTransferInp_t *myInput ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -1674,7 +1672,7 @@ sameHostPartialCopy( portalTransferInp_t *myInput ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -1790,7 +1788,7 @@ locToRemPartialCopy( portalTransferInp_t *myInput ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return;
     }
 
@@ -2531,7 +2529,7 @@ singleRemToLocCopy( rsComm_t *rsComm, dataCopyInp_t *dataCopyInp ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return e.code();
     }
 
@@ -2595,7 +2593,7 @@ singleLocToRemCopy( rsComm_t *rsComm, dataCopyInp_t *dataCopyInp ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return e.code();
     }
 
@@ -2660,7 +2658,7 @@ singleL1Copy( rsComm_t *rsComm, dataCopyInp_t *dataCopyInp ) {
     try {
         trans_buff_size = irods::get_advanced_setting<const int>(irods::CFG_TRANS_BUFFER_SIZE_FOR_PARA_TRANS) * 1024 * 1024;
     } catch ( const irods::exception& e ) {
-        rodsLog( LOG_ERROR, e.what() );
+        irods::log(e);
         return e.code();
     }
 
@@ -3056,7 +3054,7 @@ irods::error get_script_output_single_line(
          << " " << irods::get_irods_home_directory().string()
          << "/scripts/" << script_name;
     } catch (const irods::exception& e) {
-        rodsLog(LOG_ERROR, e.what());
+        irods::log(e);
         return ERROR(-1, "failed to get irods home directory");
     }
     for ( std::vector<std::string>::size_type i = 0; i < args.size(); ++i ) {
@@ -3197,66 +3195,6 @@ irods::error list_rule_plugin_instances(
     return SUCCESS();
 }
 
-static bool data_object_has_metadata(
-    rsComm_t*   _comm,
-    const char* _path,
-    const char* _attribute,
-    const char* _value,
-    const char* _unit ) {
-    namespace bfs = boost::filesystem;
-
-    genQueryInp_t inp;
-    memset( &inp, 0, sizeof( inp ) );
-    inp.maxRows = 1;
-
-    std::string query = "SELECT DATA_ID where DATA_NAME = '";
-
-    bfs::path p(_path);
-    query += p.filename().string();
-    query += "' ";
-
-    if( _attribute ) {
-        query += "AND META_DATA_ATTR_NAME = '";
-        query += _attribute;
-        query += "'";
-    }
-
-    if( _value ) {
-        query += " AND META_DATA_ATTR_VALUE = '";
-        query += _value;
-        query += "'";
-    }
-
-    if( _unit ) {
-        query += " AND META_DATA_ATTR_UNITS = '";
-        query += _unit;
-        query += "'";
-    }
-
-    int err = fillGenQueryInpFromStrCond( (char*)query.c_str(), &inp );
-    if(err < 0) {
-        rodsLog(
-            LOG_ERROR,
-            "fill query failed for [%s]",
-            query.c_str());
-    }
-
-    genQueryOut_t *out = 0;
-    int ret = rsGenQuery(_comm, &inp, &out);
-    if(ret < 0) {
-        freeGenQueryOut(&out);
-        return false;
-    }
-
-    if(out->rowCnt > 0) {
-       freeGenQueryOut(&out);
-       return true;
-    }
-
-    freeGenQueryOut(&out);
-    return false;
-}
-
 void applyMetadataFromKVP(rsComm_t *rsComm, dataObjInp_t *dataObjInp) {
     if ( !rsComm ) {
         THROW( SYS_INTERNAL_NULL_INPUT_ERR, "null rsComm passed in" );
@@ -3267,17 +3205,6 @@ void applyMetadataFromKVP(rsComm_t *rsComm, dataObjInp_t *dataObjInp) {
     if ( const char* serialized_metadata = getValByKey( &dataObjInp->condInput, METADATA_INCLUDED_KW ) ) {
         std::vector<std::string> deserialized_metadata = irods::deserialize_metadata( serialized_metadata );
         for ( size_t i = 0; i + 2 < deserialized_metadata.size(); i += 3 ) {
-
-            bool avu_exists = data_object_has_metadata(
-                                   rsComm,
-                                   dataObjInp->objPath,
-                                   deserialized_metadata[i].c_str(),
-                                   deserialized_metadata[i + 1].c_str(),
-                                   deserialized_metadata[i + 2].c_str() );
-            if(avu_exists) {
-                continue;
-            }
-
             modAVUMetadataInp_t modAVUMetadataInp;
             memset( &modAVUMetadataInp, 0, sizeof( modAVUMetadataInp ) );
 

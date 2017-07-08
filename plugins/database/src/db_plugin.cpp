@@ -503,18 +503,29 @@ _canConnectToCatalog(
     return result;
 }
 
-int
-_resolveHostName(
-    rsComm_t* _rsComm,
-    const char* _hostAddress,
-    struct hostent *& _hostEnt ) {
+static
+int hostname_resolves_to_ipv4(const char* _hostname) {
+    struct addrinfo hint;
+    memset(&hint, 0, sizeof(hint));
+    hint.ai_family = AF_INET;
+    struct addrinfo *p_addrinfo;
+    const int ret_getaddrinfo_with_retry = getaddrinfo_with_retry(_hostname, 0, &hint, &p_addrinfo);
+    if (ret_getaddrinfo_with_retry) {
+        return ret_getaddrinfo_with_retry;
+    }
+    freeaddrinfo(p_addrinfo);
+    return 0;
+}
 
-    const int status = gethostbyname_with_retry( _hostAddress, &_hostEnt );
+
+int
+_resolveHostName(rsComm_t* _rsComm, const char* _hostAddress) {
+    const int status = hostname_resolves_to_ipv4(_hostAddress);
 
     if ( status != 0 ) {
         char errMsg[155];
         snprintf( errMsg, 150,
-                  "Warning, resource host address '%s' is not a valid DNS entry, gethostbyname failed.",
+                  "Warning, resource host address '%s' is not a valid DNS entry, hostname_resolves_to_ipv4 failed.",
                   _hostAddress );
         addRErrorMsg( &_rsComm->rError, 0, errMsg );
     }
@@ -710,6 +721,30 @@ _rescHasParentOrChild( char* rescId ) {
 
 }
 
+bool _userInRUserAuth( char* userName, char* zoneName ) {
+    int status;
+    rodsLong_t iVal;
+    irods::sql_logger logger( "_userInRUserAuth", logSQL );
+
+    logger.log();
+    {
+        std::vector<std::string> bindVars;
+        bindVars.push_back( userName );
+        bindVars.push_back( zoneName );
+        status = cmlGetIntegerValueFromSql(
+                    "select user_id from R_USER_AUTH where user_id=(select user_id from R_USER_MAIN where user_name=? and zone_name=?)",
+                    &iVal, bindVars, &icss );
+    }
+    if ( status != 0 ) {
+        if ( status != CAT_NO_ROWS_FOUND ) {
+            _rollback( "_userInRUserAuth" );
+        }
+        return false;
+    } else {
+        return true;
+    }
+}
+
 // =-=-=-=-=-=-=-
 /// @brief function which determines if a char is allowed in a zone name
 static bool allowed_zone_char( const char _c ) {
@@ -903,7 +938,7 @@ static int _modRescInHierarchies( const std::string& old_resc, const std::string
     // Get STANDARD_CONFORMING_STRINGS setting to determine if backslashes in regex must be escaped
     irods::error ret = irods::get_catalog_property<std::string>( irods::STANDARD_CONFORMING_STRINGS, std_conf_str );
     if ( !ret.ok() ) {
-        rodsLog( LOG_ERROR, ret.result().c_str() );
+        rodsLog( LOG_ERROR, "%s", ret.result().c_str() );
     }
 
     // =-=-=-=-=-=-=-
@@ -1779,17 +1814,31 @@ icatGetTicketGroupId( irods::plugin_property_map& _prop_map, const char *groupNa
     return 0;
 }
 
+
+static
+int convert_hostname_to_dotted_decimal_ipv4_and_store_in_buffer(const char* _hostname, char* _buf) {
+    struct addrinfo hint;
+    memset(&hint, 0, sizeof(hint));
+    hint.ai_family = AF_INET;
+    struct addrinfo *p_addrinfo;
+    const int ret_getaddrinfo_with_retry = getaddrinfo_with_retry(_hostname, 0, &hint, &p_addrinfo);
+    if (ret_getaddrinfo_with_retry) {
+        return ret_getaddrinfo_with_retry;
+    }
+    sprintf(_buf, "%s", inet_ntoa(reinterpret_cast<struct sockaddr_in*>(p_addrinfo->ai_addr)->sin_addr));
+    freeaddrinfo(p_addrinfo);
+    return 0;
+}
+
+
 char *
 convertHostToIp( const char *inputName ) {
-    struct hostent *myHostent;
     static char ipAddr[50];
-    const int status = gethostbyname_with_retry( inputName, &myHostent );
-    if ( status != 0 ) {
-        rodsLog( LOG_ERROR, "convertHostToIp gethostbyname_with_retry error. status [%d]", status );
+    const int status = convert_hostname_to_dotted_decimal_ipv4_and_store_in_buffer(inputName, ipAddr);
+    if (status != 0) {
+        rodsLog( LOG_ERROR, "convertHostToIp convert_hostname_to_dotted_decimal_ipv4_and_store_in_buffer error. status [%d]", status );
         return NULL;
     }
-    snprintf( ipAddr, sizeof( ipAddr ), "%s",
-              ( char * )inet_ntoa( *( struct in_addr* )( myHostent->h_addr_list[0] ) ) );
     return ipAddr;
 }
 
@@ -3037,6 +3086,10 @@ irods::error db_reg_replica_op(
                  "chlRegReplica cmlExecuteNoAnswerSql(insert) failure %d",
                  status );
         _rollback( "chlRegReplica" );
+        const int free_status = cmlFreeStatement( statementNumber, &icss );
+        if (free_status != 0) {
+            rodsLog(LOG_ERROR, "db_reg_replica_op: cmlFreeStatement0 failure [%d]", free_status);
+        }
         return ERROR( status, "cmlExecuteNoAnswerSql(insert) failure" );
     }
 
@@ -3044,6 +3097,10 @@ irods::error db_reg_replica_op(
     ret = getLocalZone( _ctx.prop_map(), &icss, zone );
     if ( !ret.ok() ) {
         rodsLog( LOG_ERROR, "chlRegReplica - failed in getLocalZone with status [%d]", status );
+        const int free_status = cmlFreeStatement( statementNumber, &icss );
+        if (free_status != 0) {
+            rodsLog(LOG_ERROR, "db_reg_replica_op: cmlFreeStatement1 failure [%d]", free_status);
+        }
         return PASS( ret );
     }
 
@@ -3914,7 +3971,6 @@ irods::error db_reg_resc_op(
     char idNum[MAX_SQL_SIZE];
     int status;
     char myTime[50];
-    struct hostent *myHostEnt; // JMC - backport 4597
 
     if ( logSQL != 0 ) {
         rodsLog( LOG_SQL, "chlRegResc" );
@@ -3992,7 +4048,7 @@ irods::error db_reg_resc_op(
     if ( resc_input[irods::RESOURCE_LOCATION] != irods::EMPTY_RESC_HOST ) {
         // =-=-=-=-=-=-=-
         // JMC - backport 4597
-        _resolveHostName( _ctx.comm(), resc_input[irods::RESOURCE_LOCATION].c_str(), myHostEnt );
+        _resolveHostName( _ctx.comm(), resc_input[irods::RESOURCE_LOCATION].c_str());
     }
 
     getNowStr( myTime );
@@ -7572,7 +7628,8 @@ irods::error db_mod_user_op(
     char form2[] = "update R_USER_MAIN set %s=%s, modify_ts=? where user_name=? and zone_name=?";
     char form3[] = "update R_USER_PASSWORD set rcat_password=?, modify_ts=? where user_id=?";
     char form4[] = "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts,  create_ts, modify_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?, ?, ?)";
-    char form5[] = "insert into R_USER_AUTH (user_id, user_auth_name, create_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?)";
+    char form5a[] = "insert into R_USER_AUTH (user_id, user_auth_name, create_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?)";
+    char form5b[] = "update R_USER_AUTH set user_auth_name=? where user_id = (select user_id from R_USER_MAIN where user_name=? and zone_name=?)";
     char form6[] = "delete from R_USER_AUTH where user_id = (select user_id from R_USER_MAIN where user_name=? and zone_name=?) and user_auth_name = ?";
 #if MY_ICAT
     char form7[] = "delete from R_USER_PASSWORD where pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer)>=? and cast(pass_expiry_ts as signed integer)<=? and user_id = (select user_id from R_USER_MAIN where user_name=? and zone_name=?)";
@@ -7693,11 +7750,19 @@ irods::error db_mod_user_op(
     }
     if ( strcmp( _option, "addAuth" ) == 0 ) {
         opType = 4;
-        rstrcpy( tSQL, form5, MAX_SQL_SIZE );
-        cllBindVars[cllBindVarCount++] = userName2;
-        cllBindVars[cllBindVarCount++] = zoneName;
-        cllBindVars[cllBindVarCount++] = _new_value;
-        cllBindVars[cllBindVarCount++] = myTime;
+        if ( !_userInRUserAuth( userName2, zoneName ) ) {
+            rstrcpy( tSQL, form5a, MAX_SQL_SIZE );
+            cllBindVars[cllBindVarCount++] = userName2;
+            cllBindVars[cllBindVarCount++] = zoneName;
+            cllBindVars[cllBindVarCount++] = _new_value;
+            cllBindVars[cllBindVarCount++] = myTime;
+        } else {
+            rstrcpy( tSQL, form5b, MAX_SQL_SIZE );
+            cllBindVars[cllBindVarCount++] = _new_value;
+            cllBindVars[cllBindVarCount++] = userName2;
+            cllBindVars[cllBindVarCount++] = zoneName;
+        }
+
         if ( logSQL != 0 ) {
             rodsLog( LOG_SQL, "chlModUser SQL 4" );
         }
@@ -8163,7 +8228,6 @@ irods::error db_mod_resc_op(
     char rescPath[MAX_NAME_LEN] = "";
     char rescPathMsg[MAX_NAME_LEN + 100];
     char commentStr[200];
-    struct hostent *myHostEnt; // JMC - backport 4597
 
     if ( logSQL != 0 ) {
         rodsLog( LOG_SQL, "chlModResc" );
@@ -8336,7 +8400,7 @@ irods::error db_mod_resc_op(
     if ( strcmp( _option, "host" ) == 0 ) {
         // =-=-=-=-=-=-=-
         // JMC - backport 4597
-        _resolveHostName( _ctx.comm(), _option_value, myHostEnt );
+        _resolveHostName( _ctx.comm(), _option_value);
 
         // =-=-=-=-=-=-=-
         cllBindVars[cllBindVarCount++] = _option_value;
@@ -12565,7 +12629,7 @@ irods::error db_calc_usage_and_quota_op(
     }
     cllBindVars[cllBindVarCount++] = myTime;
     status =  cmlExecuteNoAnswerSql(
-                  "insert into R_QUOTA_USAGE (quota_usage, resc_id, user_id, modify_ts) (select sum(R_DATA_MAIN.data_size), R_RESC_MAIN.resc_id, R_USER_MAIN.user_id, ? from R_DATA_MAIN, R_USER_MAIN, R_RESC_MAIN where R_USER_MAIN.user_name = R_DATA_MAIN.data_owner_name and R_USER_MAIN.zone_name = R_DATA_MAIN.data_owner_zone and R_RESC_MAIN.resc_name = R_DATA_MAIN.resc_name group by R_RESC_MAIN.resc_id, user_id)",
+                  "insert into R_QUOTA_USAGE (quota_usage, resc_id, user_id, modify_ts) (select sum(R_DATA_MAIN.data_size), R_RESC_MAIN.resc_id, R_USER_MAIN.user_id, ? from R_DATA_MAIN, R_USER_MAIN, R_RESC_MAIN where R_USER_MAIN.user_name = R_DATA_MAIN.data_owner_name and R_USER_MAIN.zone_name = R_DATA_MAIN.data_owner_zone and R_RESC_MAIN.resc_id = R_DATA_MAIN.resc_id group by R_RESC_MAIN.resc_id, user_id)",
                   &icss );
     if ( status == CAT_SUCCESS_BUT_WITH_NO_INFO ) {
         status = 0;    /* no files, OK */
@@ -12686,7 +12750,7 @@ irods::error db_set_quota_op(
             bindVars.push_back( userName );
             bindVars.push_back( userZone );
             status = cmlGetIntegerValueFromSql(
-                         "select user_id from R_USER_MAIN where user_name=? and zone_name=?",
+                         "select user_id from R_USER_MAIN where user_name=? and zone_name=? and user_type_name!='rodsgroup'",
                          &userId, bindVars, &icss );
         }
         if ( status != 0 ) {
@@ -14538,6 +14602,12 @@ irods::error db_mod_ticket_op(
 
     /* create */
     if ( strcmp( _op_name, "create" ) == 0 ) {
+
+        if (isInteger(const_cast<char*>(_ticket_string))) {
+            rodsLog( LOG_NOTICE, "chlModTicket create ticket, string cannot be a number [%s]", _ticket_string );
+            return ERROR( CAT_TICKET_INVALID, "ticket string cannot be a number" );
+        }
+
         status = splitPathByKey( _arg4,
                                  logicalParentDirName, MAX_NAME_LEN, logicalEndName, MAX_NAME_LEN, '/' );
         if ( strlen( logicalParentDirName ) == 0 ) {
@@ -15406,25 +15476,6 @@ irods::error db_general_update_op(
 // =-=-=-=-=-=-=-
 //
 irods::error db_start_operation( irods::plugin_property_map& _props ) {
-#ifdef MY_ICAT
-    char cml_res[ 100 ];
-    const char sql[] = "select PREG_REPLACE('/failed/i', 'succeeded', 'Call to PREG_REPLACE() failed.')";
-    std::vector<std::string> bindVars;
-    int status = cmlGetStringValueFromSql( sql, cml_res, sizeof( cml_res ), bindVars, &icss );
-    if ( status < 0 ) {
-        return ERROR( status, "Failed to call PREG_REPLACE(). See section \"Installing lib_mysqludf_preg\" of iRODS Manual." );
-    }
-
-    if ( strcmp( "Call to PREG_REPLACE() succeeded.", cml_res ) ) {
-        std::stringstream ss;
-        ss << "Call to PREG_REPLACE() returned incorrect result: ["
-           << cml_res
-           << "].";
-        return ERROR( PLUGIN_ERROR, ss.str().c_str() );
-    }
-    rodsLog( LOG_DEBUG, "db_start_operation :: Call to PREG_REPLACE() succeeded" );
-#endif
-
     return SUCCESS();
 
 } // db_start_operation
